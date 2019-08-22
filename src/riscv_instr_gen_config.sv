@@ -98,6 +98,10 @@ class riscv_instr_gen_config extends uvm_object;
   bit                    enable_illegal_instruction;
   bit                    enable_hint_instruction;
   int                    bin_program_instr_cnt = 200;
+  // Number of instructions in the generated debug sub-program
+  // Want to keep it relatively small since debug stimulus will be received
+  // numerous times in a test
+  int                    debug_bin_program_instr_cnt = 100;
   // Directed boot privileged mode, u, m, s
   string                 boot_mode_opts;
   int                    enable_page_table_exception;

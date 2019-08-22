@@ -33,7 +33,9 @@ class riscv_asm_program_gen extends uvm_object;
    riscv_instr_sequence                bin_program;
    riscv_instr_sequence                debug_program;
    riscv_instr_sequence                debug_sub_program[];
+   riscv_instr_sequence                debug_bin_program;
    string                              instr_binary[$];
+   string                              debug_instr_binary[$];
    // Kernel programs
    // These programs are called in the interrupt/exception handling routine based on the privileged
    // mode settings. For example, when the interrupt/exception is delegated to S-mode, if both SUM
@@ -78,23 +80,7 @@ class riscv_asm_program_gen extends uvm_object;
     // Generate sub program in binary format
     // Illegal instruction and hint instruction cannot pass compilation, need to directly generate
     // the instruction in binary format and store in data section to skip compilation.
-    if(cfg.enable_illegal_instruction || cfg.enable_hint_instruction) begin
-      bin_program = riscv_instr_sequence::type_id::create("bin_program");
-      bin_program.instr_cnt = cfg.bin_program_instr_cnt;
-      bin_program.is_debug_program = 0;
-      bin_program.label_name = bin_program.get_name();
-      bin_program.cfg = cfg;
-      if (cfg.enable_illegal_instruction) begin
-        bin_program.illegal_instr_pct = $urandom_range(5, 20);
-      end
-      if (cfg.enable_hint_instruction) begin
-        bin_program.hint_instr_pct = $urandom_range(5, 20);
-      end
-      `DV_CHECK_RANDOMIZE_FATAL(bin_program)
-      bin_program.gen_instr(.is_main_program(0));
-      bin_program.post_process_instr();
-      bin_program.generate_binary_stream(instr_binary);
-    end
+    gen_bin_program(bin_program, instr_binary, cfg.bin_program_instr_cnt);
     // Init section
     gen_init_section();
     // Generate sub program
@@ -143,7 +129,7 @@ class riscv_asm_program_gen extends uvm_object;
     // Starting point of data section
     gen_data_page_begin();
     // Generate the sub program in binary format
-    gen_bin_program();
+    gen_bin_instr();
     // Page table
     gen_page_table_section();
     if(!cfg.no_data_page) begin
@@ -286,7 +272,33 @@ class riscv_asm_program_gen extends uvm_object;
   endfunction
 
   //---------------------------------------------------------------------------------------
-  // Major sections - init, stack, data, test_done etc.
+  // Generate the binary program, if necessary (illegal or hint instructions)
+  //---------------------------------------------------------------------------------------
+
+  virtual function void gen_bin_program(riscv_instr_sequence bin_program, ref binary[$],
+                                        int instr_cnt, bit is_debug = 1'b0,
+                                        string name = "bin_program");
+    if(cfg.enable_illegal_instruction || cfg.enable_hint_instruction) begin
+      bin_program = riscv_instr_sequence::type_id::create(name);
+      bin_program.instr_cnt = instr_cnt;
+      bin_program.is_debug_program = is_debug;
+      bin_program.label_name = bin_program.get_name();
+      bin_program.cfg = cfg;
+      if (cfg.enable_illegal_instruction) begin
+        bin_program.illegal_instr_pct = $urandom_range(5, 20);
+      end
+      if (cfg.enable_hint_instruction) begin
+        bin_program.hint_instr_pct = $urandom_range(5, 20);
+      end
+      `DV_CHECK_RANDOMIZE_FATAL(bin_program)
+      bin_program.gen_instr(.is_main_program(0), .enable_hint_instr(cfg.enable_hint_instruction));
+      bin_program.post_process_instr();
+      bin_program.generate_binary_stream(binary);
+    end
+  endfunction
+
+  //---------------------------------------------------------------------------------------
+  // major sections - init, stack, data, test_done etc.
   //---------------------------------------------------------------------------------------
 
   virtual function void gen_program_header();
@@ -1088,7 +1100,7 @@ class riscv_asm_program_gen extends uvm_object;
   endfunction
 
   // Generate sub-program in binary format, this is needed for illegal and HINT instruction
-  function void gen_bin_program();
+  function void gen_bin_instr();
     if (bin_program != null) begin
       string str;
       instr_stream.push_back("instr_bin:");
@@ -1136,6 +1148,11 @@ class riscv_asm_program_gen extends uvm_object;
         debug_program.gen_instr(.is_main_program(1'b1), .no_branch(1'b0));
         gen_callstack(debug_program, debug_sub_program, debug_sub_program_name,
                       cfg.num_debug_sub_program);
+        gen_bin_program(debug_bin_program_instr_cnt, debug_instr_binary,
+                        cfg.debug_bin_program_instr_cnt, 1'b1, "debug_bin_program");
+        if (debug_bin_program != null) begin
+          debug_program.insert_jump_instr("debug_sub_bin", 0);
+        end
         debug_program.post_process_instr();
         debug_program.generate_instr_stream(.no_label(1'b1));
         // Need to save off GPRs to avoid modifying program flow
